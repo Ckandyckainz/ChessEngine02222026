@@ -2,6 +2,16 @@ let canvas = document.getElementById("board");
 let ctx = canvas.getContext("2d");
 let statusText = document.getElementById("status");
 let resetButton = document.getElementById("resetGame");
+let playWhiteButton = document.getElementById("playWhite");
+let playRandomButton = document.getElementById("playRandom");
+let playBlackButton = document.getElementById("playBlack");
+let flipBoardButton = document.getElementById("flipBoard");
+let viewInfo = document.getElementById("viewInfo");
+let defaultPromotionPieceSelect = document.getElementById("defaultPromotionPiece");
+let useDefaultPromotionCheckbox = document.getElementById("useDefaultPromotion");
+let promotionBypassKeyInput = document.getElementById("promotionBypassKey");
+let promotionChooser = document.getElementById("promotionChooser");
+let promotionButtons = promotionChooser.querySelectorAll("button[data-piece-type]");
 
 let squareSize = canvas.width / 8;
 let selectedSquare = undefined;
@@ -9,6 +19,9 @@ let highlightedMoves = [];
 let humanPlayer = 0;
 let enginePlayer = 1;
 let whoseTurn = humanPlayer;
+let manualFlip = false;
+let pressedKeys = {};
+let pendingPromotionMoves = [];
 
 let pieceSymbols = {
     0: ["♙", "♟"],
@@ -19,31 +32,201 @@ let pieceSymbols = {
     5: ["♔", "♚"]
 };
 
+function isBoardFlipped() {
+    return (humanPlayer == 0) != manualFlip;
+}
+
+function boardIndexToDisplay(index) {
+    let x = index % 8;
+    let y = Math.floor(index / 8);
+    if (isBoardFlipped()) {
+        x = 7 - x;
+        y = 7 - y;
+    }
+    return {x: x, y: y};
+}
+
+function displayToBoardIndex(x, y) {
+    if (isBoardFlipped()) {
+        x = 7 - x;
+        y = 7 - y;
+    }
+    return y * 8 + x;
+}
+
+function getSideName(player) {
+    return player == 0 ? "White" : "Black";
+}
+
+function updateViewInfo() {
+    let bottomPlayer = isBoardFlipped() ? 0 : 1;
+    viewInfo.textContent = "You: " + getSideName(humanPlayer) + " | Bottom: " + getSideName(bottomPlayer);
+}
+
+function drawCoordinates() {
+    ctx.font = "12px sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+
+    for (let displayY = 0; displayY < 8; displayY++) {
+        let boardIndex = displayToBoardIndex(0, displayY);
+        let boardY = Math.floor(boardIndex / 8);
+        let rankText = String(8 - boardY);
+
+        ctx.fillStyle = (displayY % 2 == 0) ? "#b58863" : "#f0d9b5";
+        ctx.fillText(rankText, 3, displayY * squareSize + 3);
+    }
+
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+
+    for (let displayX = 0; displayX < 8; displayX++) {
+        let boardIndex = displayToBoardIndex(displayX, 7);
+        let boardX = boardIndex % 8;
+        let fileText = String.fromCharCode(97 + boardX);
+
+        ctx.fillStyle = ((displayX + 7) % 2 == 0) ? "#b58863" : "#f0d9b5";
+        ctx.fillText(fileText, (displayX + 1) * squareSize - 3, canvas.height - 3);
+    }
+}
+
+function isPromotionMove(move) {
+    return move.notes && move.notes[0] == "promote";
+}
+
+function normalizeBypassKey(key) {
+    let normalized = key.trim().toLowerCase();
+    if (normalized == "ctrl") {
+        return "control";
+    }
+    return normalized;
+}
+
+function doesBypassKeyMatch() {
+    let bypassKey = promotionBypassKeyInput.value.trim();
+    if (bypassKey.length == 0) {
+        return false;
+    }
+
+    let normalizedBypassKey = normalizeBypassKey(bypassKey);
+    if (normalizedBypassKey == "control") {
+        return pressedKeys.control == true;
+    }
+
+    return pressedKeys[normalizedBypassKey] == true;
+}
+
+function hidePromotionChooser() {
+    pendingPromotionMoves = [];
+    promotionChooser.hidden = true;
+}
+
+function showPromotionChooser(promotionMoves) {
+    pendingPromotionMoves = promotionMoves;
+    let promotionPlayer = board[promotionMoves[0].pieceIndex].player;
+
+    for (let i = 0; i < promotionButtons.length; i++) {
+        let pieceType = parseInt(promotionButtons[i].dataset.pieceType);
+        promotionButtons[i].textContent = pieceSymbols[pieceType][promotionPlayer];
+        promotionButtons[i].style.fontSize = "28px";
+        promotionButtons[i].style.minWidth = "40px";
+    }
+
+    promotionChooser.hidden = false;
+    statusText.textContent = "Choose promotion piece.";
+}
+
+function findPromotionMoveByPieceType(pieceType) {
+    for (let i = 0; i < pendingPromotionMoves.length; i++) {
+        if (pendingPromotionMoves[i].notes[1] == pieceType) {
+            return pendingPromotionMoves[i];
+        }
+    }
+
+    return undefined;
+}
+
+function completeHumanMove(chosenMove) {
+    makeMove(chosenMove);
+    clearSelection();
+    hidePromotionChooser();
+    whoseTurn = enginePlayer;
+    statusText.textContent = "Engine thinking...";
+    drawBoard();
+    setTimeout(engineTurn, 150);
+}
+
+function resolveChosenMove(square) {
+    let movesToSquare = [];
+    for (let i = 0; i < highlightedMoves.length; i++) {
+        if (highlightedMoves[i].moveTo == square) {
+            movesToSquare.push(highlightedMoves[i]);
+        }
+    }
+
+    if (movesToSquare.length == 0) {
+        return undefined;
+    }
+
+    let promotionMoves = [];
+    for (let i = 0; i < movesToSquare.length; i++) {
+        if (isPromotionMove(movesToSquare[i])) {
+            promotionMoves.push(movesToSquare[i]);
+        }
+    }
+
+    if (promotionMoves.length == 0) {
+        return movesToSquare[0];
+    }
+
+    let pieceType = undefined;
+    if (useDefaultPromotionCheckbox.checked && !doesBypassKeyMatch()) {
+        pieceType = parseInt(defaultPromotionPieceSelect.value);
+    } else {
+        showPromotionChooser(promotionMoves);
+        return "pending";
+    }
+
+    for (let i = 0; i < promotionMoves.length; i++) {
+        if (promotionMoves[i].notes[1] == pieceType) {
+            return promotionMoves[i];
+        }
+    }
+
+    return promotionMoves[0];
+}
+
+function setHumanSide(player) {
+    humanPlayer = player;
+    enginePlayer = 1 - player;
+    manualFlip = false;
+    resetGame();
+}
+
 function drawBoard() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
-            let index = y * 8 + x;
-            let isLight = (x + y) % 2 == 0;
+    for (let displayY = 0; displayY < 8; displayY++) {
+        for (let displayX = 0; displayX < 8; displayX++) {
+            let index = displayToBoardIndex(displayX, displayY);
+            let isLight = (displayX + displayY) % 2 == 0;
 
             ctx.fillStyle = isLight ? "#f0d9b5" : "#b58863";
-            ctx.fillRect(x * squareSize, y * squareSize, squareSize, squareSize);
+            ctx.fillRect(displayX * squareSize, displayY * squareSize, squareSize, squareSize);
 
             if (index == selectedSquare) {
                 ctx.fillStyle = "rgba(70, 130, 180, 0.45)";
-                ctx.fillRect(x * squareSize, y * squareSize, squareSize, squareSize);
+                ctx.fillRect(displayX * squareSize, displayY * squareSize, squareSize, squareSize);
             }
         }
     }
 
     for (let i = 0; i < highlightedMoves.length; i++) {
         let move = highlightedMoves[i];
-        let x = move.moveTo % 8;
-        let y = Math.floor(move.moveTo / 8);
+        let displayPos = boardIndexToDisplay(move.moveTo);
         ctx.fillStyle = "rgba(0, 180, 0, 0.45)";
         ctx.beginPath();
-        ctx.arc(x * squareSize + squareSize / 2, y * squareSize + squareSize / 2, squareSize * 0.15, 0, Math.PI * 2);
+        ctx.arc(displayPos.x * squareSize + squareSize / 2, displayPos.y * squareSize + squareSize / 2, squareSize * 0.15, 0, Math.PI * 2);
         ctx.fill();
     }
 
@@ -57,13 +240,15 @@ function drawBoard() {
             continue;
         }
 
-        let x = i % 8;
-        let y = Math.floor(i / 8);
+        let displayPos = boardIndexToDisplay(i);
         let symbol = pieceSymbols[cell.pieceType][cell.player];
 
         ctx.fillStyle = cell.player == 0 ? "#111" : "#000";
-        ctx.fillText(symbol, x * squareSize + squareSize / 2, y * squareSize + squareSize / 2 + 2);
+        ctx.fillText(symbol, displayPos.x * squareSize + squareSize / 2, displayPos.y * squareSize + squareSize / 2 + 2);
     }
+
+    drawCoordinates();
+    updateViewInfo();
 }
 
 function getMovesForPlayer(player) {
@@ -115,9 +300,18 @@ function resetGame() {
     }
 
     clearSelection();
-    whoseTurn = humanPlayer;
-    statusText.textContent = "Game reset. Your turn.";
+    hidePromotionChooser();
+    whoseTurn = 0;
+    if (whoseTurn == humanPlayer) {
+        statusText.textContent = "Game reset. Your turn.";
+    } else {
+        statusText.textContent = "Game reset. Engine thinking...";
+    }
     drawBoard();
+
+    if (whoseTurn == enginePlayer) {
+        setTimeout(engineTurn, 150);
+    }
 }
 
 function clearSelection() {
@@ -158,26 +352,25 @@ canvas.addEventListener("click", function (event) {
     }
 
     let rect = canvas.getBoundingClientRect();
-    let x = Math.floor((event.clientX - rect.left) / squareSize);
-    let y = Math.floor((event.clientY - rect.top) / squareSize);
-    let square = y * 8 + x;
+    let displayX = Math.floor((event.clientX - rect.left) / squareSize);
+    let displayY = Math.floor((event.clientY - rect.top) / squareSize);
+
+    if (displayX < 0 || displayX > 7 || displayY < 0 || displayY > 7) {
+        return;
+    }
+
+    let square = displayToBoardIndex(displayX, displayY);
 
     if (selectedSquare != undefined) {
-        let chosenMove = undefined;
-        for (let i = 0; i < highlightedMoves.length; i++) {
-            if (highlightedMoves[i].moveTo == square) {
-                chosenMove = highlightedMoves[i];
-                break;
-            }
+        let chosenMove = resolveChosenMove(square);
+
+        if (chosenMove == "pending") {
+            drawBoard();
+            return;
         }
 
         if (chosenMove) {
-            makeMove(chosenMove);
-            clearSelection();
-            whoseTurn = enginePlayer;
-            statusText.textContent = "Engine thinking...";
-            drawBoard();
-            setTimeout(engineTurn, 150);
+            completeHumanMove(chosenMove);
             return;
         }
     }
@@ -210,4 +403,57 @@ resetButton.addEventListener("click", function () {
     resetGame();
 });
 
-drawBoard();
+playWhiteButton.addEventListener("click", function () {
+    setHumanSide(0);
+});
+
+playRandomButton.addEventListener("click", function () {
+    let randomSide = Math.random() < 0.5 ? 0 : 1;
+    setHumanSide(randomSide);
+});
+
+playBlackButton.addEventListener("click", function () {
+    setHumanSide(1);
+});
+
+flipBoardButton.addEventListener("click", function () {
+    manualFlip = !manualFlip;
+    drawBoard();
+});
+
+for (let i = 0; i < promotionButtons.length; i++) {
+    promotionButtons[i].addEventListener("click", function () {
+        let pieceType = parseInt(this.dataset.pieceType);
+        let chosenMove = findPromotionMoveByPieceType(pieceType);
+        if (!chosenMove) {
+            statusText.textContent = "Promotion move not found.";
+            hidePromotionChooser();
+            drawBoard();
+            return;
+        }
+
+        completeHumanMove(chosenMove);
+    });
+}
+
+document.addEventListener("keydown", function (event) {
+    if (event.key) {
+        pressedKeys[event.key.toLowerCase()] = true;
+    }
+
+    if (event.key == "Control") {
+        pressedKeys.control = true;
+    }
+});
+
+document.addEventListener("keyup", function (event) {
+    if (event.key) {
+        pressedKeys[event.key.toLowerCase()] = false;
+    }
+
+    if (event.key == "Control") {
+        pressedKeys.control = false;
+    }
+});
+
+resetGame();
