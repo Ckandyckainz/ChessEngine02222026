@@ -24,6 +24,9 @@ for (let i=0; i<2; i++) {
             player: i,
             notes: []
         };
+        if (i == 1 && standardStartingPositionSide[j] >= 4) {
+            board[boardStartSide+j*jm].pieceType = 9-standardStartingPositionSide[j];
+        }
     }
 }
 
