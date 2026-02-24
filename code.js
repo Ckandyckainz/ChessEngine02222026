@@ -107,6 +107,14 @@ function getLegalMoves(board, player){
                                         safeSquare = false;
                                     }
                                 });
+                                for (let i=-1; i<2; i+=2) {
+                                    if (inBoardBounds(x+i, y+moveDirection)) {
+                                        let square = board[(y+moveDirection)*8+x+i];
+                                        if (square.player == 1-player && square.pieceType == 0) {
+                                            safeSquare = false;
+                                        }
+                                    }
+                                }
                                 if (safeSquare) {
                                     legalMoves.push({pieceIndex: i, moveTo: moveToIndex, notes: []});
                                 }
