@@ -19,9 +19,15 @@ let highlightedMoves = [];
 let humanPlayer = 0;
 let enginePlayer = 1;
 let whoseTurn = humanPlayer;
-let manualFlip = false;
 let pressedKeys = {};
 let pendingPromotionMoves = [];
+
+let boardViewStates = {
+    whiteBottom: "whiteBottom",
+    blackBottom: "blackBottom"
+};
+
+let boardViewState = boardViewStates.whiteBottom;
 
 let pieceSymbols = {
     0: ["♙", "♟"],
@@ -32,26 +38,56 @@ let pieceSymbols = {
     5: ["♔", "♚"]
 };
 
-function isBoardFlipped() {
-    return (humanPlayer == 0) != manualFlip;
+function getDefaultViewStateForHumanSide() {
+    return humanPlayer == 0 ? boardViewStates.whiteBottom : boardViewStates.blackBottom;
+}
+
+function toggleBoardViewState() {
+    if (boardViewState == boardViewStates.whiteBottom) {
+        boardViewState = boardViewStates.blackBottom;
+    } else {
+        boardViewState = boardViewStates.whiteBottom;
+    }
+}
+
+function boardXYToDisplay(x, y) {
+    if (boardViewState == boardViewStates.whiteBottom) {
+        return {x: x, y: 7 - y};
+    }
+
+    return {x: 7 - x, y: y};
+}
+
+function displayToBoardXY(x, y) {
+    if (boardViewState == boardViewStates.whiteBottom) {
+        return {x: x, y: 7 - y};
+    }
+
+    return {x: 7 - x, y: y};
 }
 
 function boardIndexToDisplay(index) {
     let x = index % 8;
     let y = Math.floor(index / 8);
-    if (isBoardFlipped()) {
-        x = 7 - x;
-        y = 7 - y;
-    }
-    return {x: x, y: y};
+    return boardXYToDisplay(x, y);
 }
 
 function displayToBoardIndex(x, y) {
-    if (isBoardFlipped()) {
-        x = 7 - x;
-        y = 7 - y;
-    }
-    return y * 8 + x;
+    let boardPos = displayToBoardXY(x, y);
+    return boardPos.y * 8 + boardPos.x;
+}
+
+function boardIndexToCoordinate(index) {
+    let file = index % 8;
+    let rank = Math.floor(index / 8);
+    return {
+        fileText: String.fromCharCode(97 + file),
+        rankText: String(rank + 1)
+    };
+}
+
+function isLightSquare(x, y) {
+    return (x + y) % 2 == 1;
 }
 
 function getSideName(player) {
@@ -59,7 +95,7 @@ function getSideName(player) {
 }
 
 function updateViewInfo() {
-    let bottomPlayer = isBoardFlipped() ? 0 : 1;
+    let bottomPlayer = boardViewState == boardViewStates.whiteBottom ? 0 : 1;
     viewInfo.textContent = "You: " + getSideName(humanPlayer) + " | Bottom: " + getSideName(bottomPlayer);
 }
 
@@ -70,11 +106,12 @@ function drawCoordinates() {
 
     for (let displayY = 0; displayY < 8; displayY++) {
         let boardIndex = displayToBoardIndex(0, displayY);
-        let boardY = Math.floor(boardIndex / 8);
-        let rankText = String(8 - boardY);
+        let coordinate = boardIndexToCoordinate(boardIndex);
+        let boardPos = displayToBoardXY(0, displayY);
+        let isLight = isLightSquare(boardPos.x, boardPos.y);
 
-        ctx.fillStyle = (displayY % 2 == 0) ? "#b58863" : "#f0d9b5";
-        ctx.fillText(rankText, 3, displayY * squareSize + 3);
+        ctx.fillStyle = isLight ? "#b58863" : "#f0d9b5";
+        ctx.fillText(coordinate.rankText, 3, displayY * squareSize + 3);
     }
 
     ctx.textAlign = "right";
@@ -82,11 +119,12 @@ function drawCoordinates() {
 
     for (let displayX = 0; displayX < 8; displayX++) {
         let boardIndex = displayToBoardIndex(displayX, 7);
-        let boardX = boardIndex % 8;
-        let fileText = String.fromCharCode(97 + boardX);
+        let coordinate = boardIndexToCoordinate(boardIndex);
+        let boardPos = displayToBoardXY(displayX, 7);
+        let isLight = isLightSquare(boardPos.x, boardPos.y);
 
-        ctx.fillStyle = ((displayX + 7) % 2 == 0) ? "#b58863" : "#f0d9b5";
-        ctx.fillText(fileText, (displayX + 1) * squareSize - 3, canvas.height - 3);
+        ctx.fillStyle = isLight ? "#b58863" : "#f0d9b5";
+        ctx.fillText(coordinate.fileText, (displayX + 1) * squareSize - 3, canvas.height - 3);
     }
 }
 
@@ -199,7 +237,7 @@ function resolveChosenMove(square) {
 function setHumanSide(player) {
     humanPlayer = player;
     enginePlayer = 1 - player;
-    manualFlip = false;
+    boardViewState = getDefaultViewStateForHumanSide();
     resetGame();
 }
 
@@ -208,8 +246,9 @@ function drawBoard() {
 
     for (let displayY = 0; displayY < 8; displayY++) {
         for (let displayX = 0; displayX < 8; displayX++) {
-            let index = displayToBoardIndex(displayX, displayY);
-            let isLight = (displayX + displayY) % 2 == 0;
+            let boardPos = displayToBoardXY(displayX, displayY);
+            let index = boardPos.y * 8 + boardPos.x;
+            let isLight = isLightSquare(boardPos.x, boardPos.y);
 
             ctx.fillStyle = isLight ? "#f0d9b5" : "#b58863";
             ctx.fillRect(displayX * squareSize, displayY * squareSize, squareSize, squareSize);
@@ -417,7 +456,7 @@ playBlackButton.addEventListener("click", function () {
 });
 
 flipBoardButton.addEventListener("click", function () {
-    manualFlip = !manualFlip;
+    toggleBoardViewState();
     drawBoard();
 });
 
