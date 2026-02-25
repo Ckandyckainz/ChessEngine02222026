@@ -368,31 +368,31 @@ function getLegalMoves(board, player, gameNotes){
                 let pieceType = board[i].pieceType;
                 if (pieceType == 0) { // pawns
                     let moveTo = i+8*moveDirection;
-                    if (board[moveTo].player == undefined) {
+                    if (moveTo >= 0 && moveTo < board.length && board[moveTo].player == undefined) {
                         addPawnMoves(i, moveTo);
                         let moveTo2 = i+16*moveDirection;
                         if (Math.abs(boardStartSide-i) < 16) {
-                            if (board[moveTo2].player == undefined) {
+                            if (moveTo2 >= 0 && moveTo2 < board.length && board[moveTo2].player == undefined) {
                                 legalMoves.push({pieceIndex: i, moveTo: moveTo2, notes: []});
                             }
                         }
                     }
                     if (moveTo%8 != 7) {
-                        if (board[moveTo+1].player == 1-player){
+                        if (moveTo + 1 >= 0 && moveTo + 1 < board.length && board[moveTo+1].player == 1-player){
                             addPawnMoves(i, moveTo+1);
                         } else if (notesState.e == moveTo+1) {
                             let epCapturedIndex = moveTo+1-8*moveDirection;
-                            if (board[epCapturedIndex].player == 1-player && board[epCapturedIndex].pieceType == 0) {
+                            if (epCapturedIndex >= 0 && epCapturedIndex < board.length && board[epCapturedIndex].player == 1-player && board[epCapturedIndex].pieceType == 0) {
                                 legalMoves.push({pieceIndex: i, moveTo: moveTo+1, notes: ["ep"]});
                             }
                         }
                     }
                     if (moveTo%8 != 0) {
-                        if (board[moveTo-1].player == 1-player) {
+                        if (moveTo - 1 >= 0 && moveTo - 1 < board.length && board[moveTo-1].player == 1-player) {
                             addPawnMoves(i, moveTo-1);
                         } else if (notesState.e == moveTo-1) {
                             let epCapturedIndex = moveTo-1-8*moveDirection;
-                            if (board[epCapturedIndex].player == 1-player && board[epCapturedIndex].pieceType == 0) {
+                            if (epCapturedIndex >= 0 && epCapturedIndex < board.length && board[epCapturedIndex].player == 1-player && board[epCapturedIndex].pieceType == 0) {
                                 legalMoves.push({pieceIndex: i, moveTo: moveTo-1, notes: ["ep"]});
                             }
                         }
@@ -416,7 +416,7 @@ function getLegalMoves(board, player, gameNotes){
         }
     }
     function addPawnMoves(pieceIndex, moveTo){
-        if (moveTo < 8 || moveTo > 56) {
+        if (moveTo < 8 || moveTo >= 56) {
             for (let i=1; i<5; i++) {
                 legalMoves.push({pieceIndex: pieceIndex, moveTo: moveTo, notes: ["promote", i]});
             }
