@@ -33,6 +33,139 @@ function boardSetup(){
     }
 }
 
+function inBoardBounds(x, y){
+    return x >= 0 && x < 8 && y >= 0 && y < 8;
+}
+
+function getKnightDistIndices(i){
+    let knightDistIndices = [];
+    for (let j=0; j<8; j++) {
+        let x = i%8+Math.round(Math.cos((j+.5)*Math.PI/4)*2);
+        let y = Math.floor(i/8)+Math.round(Math.sin((j+.5)*Math.PI/4)*2);
+        if (inBoardBounds(x, y)) {
+            knightDistIndices.push(y*8+x);
+        }
+    }
+    return knightDistIndices;
+}
+
+function rangedIterator(board, player, i, xmFunc, ymFunc, onEmptyFunc, onEnemyFunc){
+    // Iterates along 4 paths determined by the xmFunc and ymFunc. Paths terminate if they reach the edge of the board or any piece. It runs the onEmptyFunc for every empty square on the path, and the onEnemyFunc if it reaches an enemy (in which case the path terminates).
+    for (let j=0; j<4; j++) {
+        let done = false;
+        let x = i%8;
+        let y = Math.floor(i/8);
+        let xm = xmFunc(j);
+        let ym = ymFunc(j);
+        while (!done) {
+            x += xm;
+            y += ym;
+            if (inBoardBounds(x, y)) {
+                let newIndex = y*8+x;
+                if (board[newIndex].player != player) {
+                    onEmptyFunc(newIndex);
+                    if (board[newIndex].player == 1-player) {
+                        onEnemyFunc(newIndex);
+                        done = true;
+                    }
+                } else {
+                    done = true;
+                }
+            } else {
+                done = true;
+            }
+        }
+    }
+}
+
+function getSquareAttackerCount(board, player, i) {
+    let bishopXM = (j)=>{return (j%2)*2-1};
+    let bishopYM = (j)=>{return Math.floor(j/2)*2-1};
+    let rookXM = (j)=>{return ((j%2)*2-1)*(Math.floor(j/2) == 0)};
+    let rookYM = (j)=>{return ((j%2)*2-1)*(Math.floor(j/2) == 1)};
+    let moveDirection = 1-player*2;
+    let x = i%8;
+    let y = Math.floor(i/8);
+    let attackerCount = 0;
+    let knightDistIndices = getKnightDistIndices(i);
+    for (let l = 0; l < knightDistIndices.length; l++) {
+        let square = board[knightDistIndices[l]];
+        if (square.player == 1 - player && square.pieceType == 1) {
+            attackerCount ++;
+        }
+    }
+    rangedIterator(board, player, i, bishopXM, bishopYM, () => { }, (index) => {
+        let square = board[index];
+        if (square.pieceType == 2 || square.pieceType == 4) {
+            attackerCount ++;
+        }
+    });
+    rangedIterator(board, player, i, rookXM, rookYM, () => { }, (index) => {
+        let square = board[index];
+        if (square.pieceType == 3 || square.pieceType == 4) {
+            attackerCount ++;
+        }
+    });
+    for (let l = -1; l < 2; l += 2) {
+        if (inBoardBounds(x + l, y + moveDirection)) {
+            let square = board[(y + moveDirection) * 8 + x + l];
+            if (square.player == 1 - player && square.pieceType == 0) {
+                attackerCount ++;
+            }
+        }
+    }
+    for (let l = -1; l < 2; l++) {
+        for (let m = -1; m < 2; m++) {
+            if (inBoardBounds(x + l, y + m)) {
+                let square = board[(y + m) * 8 + x + l];
+                if (square.player == 1 - player && square.pieceType == 5) {
+                    attackerCount ++;
+                }
+            }
+        }
+    }
+    return attackerCount;
+}
+
+function isSquareAttackedBy(board, i, attackerPlayer) {
+    return getSquareAttackerCount(board, 1-attackerPlayer, i) > 0;
+}
+
+function applyMoveInPlace(boardState, move) {
+    let from = move.pieceIndex;
+    let to = move.moveTo;
+
+    boardState[to] = {
+        pieceType: boardState[from].pieceType,
+        player: boardState[from].player,
+        notes: boardState[from].notes || []
+    };
+
+    boardState[from] = {
+        pieceType: undefined,
+        player: undefined,
+        notes: []
+    };
+
+    if (move.notes && move.notes[0] == "promote") {
+        boardState[to].pieceType = move.notes[1];
+    }
+}
+
+function applyMoveToBoardState(boardState, move) {
+    let newBoard = [];
+    for (let i = 0; i < boardState.length; i++) {
+        newBoard.push({
+            pieceType: boardState[i].pieceType,
+            player: boardState[i].player,
+            notes: (boardState[i].notes || []).slice()
+        });
+    }
+
+    applyMoveInPlace(newBoard, move);
+    return newBoard;
+}
+
 function getLegalMoves(board, player){
     let bishopXM = (j)=>{return (j%2)*2-1};
     let bishopYM = (j)=>{return Math.floor(j/2)*2-1};
@@ -54,14 +187,14 @@ function getLegalMoves(board, player){
             if (inBoardBounds(x, y)) {
                 let moveToIndex = y * 8 + x;
                 if (board[moveToIndex].player != player) {
-                    if (getSquareAttackerCount(moveToIndex) == 0) {
+                    if (getSquareAttackerCount(board, player, moveToIndex) == 0) {
                         legalMoves.push({ pieceIndex: kingIndex, moveTo: moveToIndex, notes: [] });
                     }
                 }
             }
         }
     }
-    if (getSquareAttackerCount(kingIndex) < 2) {
+    if (getSquareAttackerCount(board, player, kingIndex) < 2) {
         for (let i=0; i<board.length; i++) {
             if (board[i].player == player) {
                 let pieceType = board[i].pieceType;
@@ -104,49 +237,6 @@ function getLegalMoves(board, player){
             }
         }
     }
-    function getSquareAttackerCount(i) {
-        let x = i%8;
-        let y = Math.floor(i/8);
-        let attackerCount = 0;
-        let knightDistIndices = getKnightDistIndices(i);
-        for (let l = 0; l < knightDistIndices.length; l++) {
-            let square = board[knightDistIndices[l]];
-            if (square.player == 1 - player && square.pieceType == 1) {
-                attackerCount ++;
-            }
-        }
-        rangedIterator(i, bishopXM, bishopYM, () => { }, (index) => {
-            let square = board[index];
-            if (square.pieceType == 2 || square.pieceType == 4) {
-                attackerCount ++;
-            }
-        });
-        rangedIterator(i, rookXM, rookYM, () => { }, (index) => {
-            let square = board[index];
-            if (square.pieceType == 3 || square.pieceType == 4) {
-                attackerCount ++;
-            }
-        });
-        for (let l = -1; l < 2; l += 2) {
-            if (inBoardBounds(x + l, y + moveDirection)) {
-                let square = board[(y + moveDirection) * 8 + x + l];
-                if (square.player == 1 - player && square.pieceType == 0) {
-                    attackerCount ++;
-                }
-            }
-        }
-        for (let l = -1; l < 2; l++) {
-            for (let m = -1; m < 2; m++) {
-                if (inBoardBounds(x + l, y + m)) {
-                    let square = board[(y + m) * 8 + x + l];
-                    if (square.player == 1 - player && square.pieceType == 5) {
-                        attackerCount ++;
-                    }
-                }
-            }
-        }
-        return attackerCount;
-    }
     function addPawnMoves(pieceIndex, moveTo){
         if (moveTo < 8 || moveTo > 56) {
             for (let i=1; i<5; i++) {
@@ -157,52 +247,443 @@ function getLegalMoves(board, player){
         }
     }
     function addRangedMoves(i, xmFunc, ymFunc){
-        rangedIterator(i, xmFunc, ymFunc,
+        rangedIterator(board, player, i, xmFunc, ymFunc,
             (index)=>{legalMoves.push({pieceIndex: i, moveTo: index, notes: []});},
             ()=>{}
         );
     }
-    function rangedIterator(i, xmFunc, ymFunc, onEmptyFunc, onEnemyFunc){
-        // Iterates along 4 paths determined by the xmFunc and ymFunc. Paths terminate if they reach the edge of the board or any piece. It runs the onEmptyFunc for every empty square on the path, and the onEnemyFunc if it reaches an enemy (in which case the path terminates).
-        for (let j=0; j<4; j++) {
-            let done = false;
-            let x = i%8;
-            let y = Math.floor(i/8);
-            let xm = xmFunc(j);
-            let ym = ymFunc(j);
-            while (!done) {
-                x += xm;
-                y += ym;
-                if (inBoardBounds(x, y)) {
-                    let newIndex = y*8+x;
-                    if (board[newIndex].player != player) {
-                        onEmptyFunc(newIndex);
-                        if (board[newIndex].player == 1-player) {
-                            onEnemyFunc(newIndex);
-                            done = true;
-                        }
-                    } else {
-                        done = true;
-                    }
-                } else {
-                    done = true;
-                }
-            }
-        }
-    }
-    function inBoardBounds(x, y){
-        return x >= 0 && x < 8 && y >= 0 && y < 8;
-    }
-    function getKnightDistIndices(i){
-        let knightDistIndices = [];
-        for (let j=0; j<8; j++) {
-            let x = i%8+Math.round(Math.cos((j+.5)*Math.PI/4)*2);
-            let y = Math.floor(i/8)+Math.round(Math.sin((j+.5)*Math.PI/4)*2);
-            if (inBoardBounds(x, y)) {
-                knightDistIndices.push(y*8+x);
-            }
-        }
-        return knightDistIndices;
-    }
     return legalMoves;
+}
+
+// Shared game/business logic moved from ui.js so multiple views (web UI, CLI, native, etc.) can reuse the same non-presentation behavior.
+let corePieceTypeToPromotionSuffix = {
+    4: "q",
+    3: "r",
+    2: "b",
+    1: "n"
+};
+
+let corePromotionSuffixToPieceType = {
+    q: 4,
+    r: 3,
+    b: 2,
+    n: 1
+};
+
+let corePieceTypeToSanLetter = {
+    1: "N",
+    2: "B",
+    3: "R",
+    4: "Q",
+    5: "K"
+};
+
+let coreFenPieceMap = {
+    p: 0,
+    n: 1,
+    b: 2,
+    r: 3,
+    q: 4,
+    k: 5
+};
+
+let corePieceTypeToFen = ["p", "n", "b", "r", "q", "k"];
+
+function coreCloneBoardState(boardToClone) {
+    let cloned = [];
+    for (let i = 0; i < boardToClone.length; i++) {
+        cloned.push({
+            pieceType: boardToClone[i].pieceType,
+            player: boardToClone[i].player,
+            notes: (boardToClone[i].notes || []).slice()
+        });
+    }
+    return cloned;
+}
+
+function coreIndexToSquareText(index) {
+    let file = String.fromCharCode(97 + (index % 8));
+    let rank = String(Math.floor(index / 8) + 1);
+    return file + rank;
+}
+
+function coreCreateCoordinateMoveToken(move) {
+    let token = coreIndexToSquareText(move.pieceIndex) + coreIndexToSquareText(move.moveTo);
+    if (move.notes && move.notes[0] == "promote") {
+        token += corePieceTypeToPromotionSuffix[move.notes[1]] || "q";
+    }
+    return token;
+}
+
+function coreFindKingIndex(boardState, player) {
+    for (let i = 0; i < boardState.length; i++) {
+        if (boardState[i].player == player && boardState[i].pieceType == 5) {
+            return i;
+        }
+    }
+    return undefined;
+}
+
+function coreGetMoveDisambiguation(move, legalMoves, boardBefore) {
+    let pieceType = boardBefore[move.pieceIndex].pieceType;
+    if (pieceType == 0) {
+        return "";
+    }
+
+    let sameTargetMoves = [];
+    for (let i = 0; i < legalMoves.length; i++) {
+        let candidate = legalMoves[i];
+        if (candidate.pieceIndex == move.pieceIndex) {
+            continue;
+        }
+
+        if (candidate.moveTo == move.moveTo && boardBefore[candidate.pieceIndex].pieceType == pieceType) {
+            sameTargetMoves.push(candidate);
+        }
+    }
+
+    if (sameTargetMoves.length == 0) {
+        return "";
+    }
+
+    let fromX = move.pieceIndex % 8;
+    let fromY = Math.floor(move.pieceIndex / 8);
+
+    let hasSameFile = false;
+    let hasSameRank = false;
+    for (let i = 0; i < sameTargetMoves.length; i++) {
+        let candidateX = sameTargetMoves[i].pieceIndex % 8;
+        let candidateY = Math.floor(sameTargetMoves[i].pieceIndex / 8);
+        if (candidateX == fromX) {
+            hasSameFile = true;
+        }
+        if (candidateY == fromY) {
+            hasSameRank = true;
+        }
+    }
+
+    if (!hasSameFile) {
+        return String.fromCharCode(97 + fromX);
+    }
+
+    if (!hasSameRank) {
+        return String(fromY + 1);
+    }
+
+    return coreIndexToSquareText(move.pieceIndex);
+}
+
+function coreNormalizeSanToken(token) {
+    if (!token) {
+        return "";
+    }
+
+    let normalized = token.trim();
+    normalized = normalized.replace(/0/g, "O");
+    normalized = normalized.replace(/[+#?!]+$/g, "");
+    normalized = normalized.replace(/e\.p\./gi, "");
+    return normalized;
+}
+
+function coreCreateSanMoveText(move, boardBefore, player, legalMoves) {
+    let pieceType = boardBefore[move.pieceIndex].pieceType;
+    let toText = coreIndexToSquareText(move.moveTo);
+    let fromX = move.pieceIndex % 8;
+
+    // TODO: use O-O / O-O-O when castling moves are represented by move generation
+    let san = "";
+    let capture = boardBefore[move.moveTo].player != undefined && boardBefore[move.moveTo].player != player;
+
+    if (pieceType == 0) {
+        if (capture) {
+            san += String.fromCharCode(97 + fromX) + "x";
+        }
+        san += toText;
+    } else {
+        san += corePieceTypeToSanLetter[pieceType] || "";
+        san += coreGetMoveDisambiguation(move, legalMoves, boardBefore);
+        if (capture) {
+            san += "x";
+        }
+        san += toText;
+    }
+
+    if (move.notes && move.notes[0] == "promote") {
+        san += "=" + (corePieceTypeToSanLetter[move.notes[1]] || "Q");
+    }
+
+    let boardAfter = applyMoveToBoardState(boardBefore, move);
+    let opponent = 1 - player;
+    let kingIndex = coreFindKingIndex(boardAfter, opponent);
+    if (kingIndex != undefined && isSquareAttackedBy(boardAfter, kingIndex, player)) {
+        let opponentMoves = getLegalMoves(boardAfter, opponent);
+        if (opponentMoves.length == 0) {
+            san += "#";
+        } else {
+            san += "+";
+        }
+    }
+
+    return san;
+}
+
+function coreCreateMoveRecord(move, boardBefore, player, legalMoves) {
+    return {
+        coordinate: coreCreateCoordinateMoveToken(move),
+        san: coreCreateSanMoveText(move, boardBefore, player, legalMoves)
+    };
+}
+
+function coreParseSquareText(squareText) {
+    if (!squareText || squareText.length != 2) {
+        return undefined;
+    }
+
+    let file = squareText.charCodeAt(0) - 97;
+    let rank = parseInt(squareText[1]);
+    if (file < 0 || file > 7 || rank < 1 || rank > 8) {
+        return undefined;
+    }
+
+    return (rank - 1) * 8 + file;
+}
+
+function coreBuildPgnText(moves, startPlayer, result) {
+    let parts = [];
+    let i = 0;
+
+    if (startPlayer == 1 && moves.length > 0) {
+        parts.push("1...");
+        parts.push((moves[0].san || moves[0].coordinate));
+        i = 1;
+    }
+
+    for (; i < moves.length; i += 2) {
+        let fullmoveNumber = 1 + Math.floor((i + startPlayer) / 2);
+        parts.push(fullmoveNumber + ".");
+        parts.push((moves[i].san || moves[i].coordinate));
+
+        if (i + 1 < moves.length) {
+            parts.push((moves[i + 1].san || moves[i + 1].coordinate));
+        }
+    }
+
+    if (result && result != "*") {
+        parts.push(result);
+    }
+
+    return parts.join(" ");
+}
+
+function coreBoardToFen(boardState, sideToMovePlayer) {
+    let rankParts = [];
+
+    for (let y = 7; y >= 0; y--) {
+        let emptyCount = 0;
+        let rankText = "";
+        for (let x = 0; x < 8; x++) {
+            let cell = boardState[y * 8 + x];
+            if (cell.player == undefined || cell.pieceType == undefined) {
+                emptyCount++;
+                continue;
+            }
+
+            if (emptyCount > 0) {
+                rankText += String(emptyCount);
+                emptyCount = 0;
+            }
+
+            let pieceChar = corePieceTypeToFen[cell.pieceType] || "p";
+            if (cell.player == 0) {
+                pieceChar = pieceChar.toUpperCase();
+            }
+            rankText += pieceChar;
+        }
+
+        if (emptyCount > 0) {
+            rankText += String(emptyCount);
+        }
+
+        rankParts.push(rankText);
+    }
+
+    let sideToMove = sideToMovePlayer == 0 ? "w" : "b";
+    // TODO: add castling rights to FEN when known
+    // TODO: add en passant target square to FEN when known
+    // TODO: add halfmove/fullmove counters to FEN when known
+    return rankParts.join("/") + " " + sideToMove + " - - 0 1";
+}
+
+function coreParseFenToState(fenText) {
+    let parts = fenText.trim().split(/\s+/);
+    if (parts.length < 2) {
+        throw new Error("FEN needs at least piece placement and side to move.");
+    }
+
+    let rankParts = parts[0].split("/");
+    if (rankParts.length != 8) {
+        throw new Error("FEN piece placement must have 8 ranks.");
+    }
+
+    let newBoard = [];
+    for (let i = 0; i < 64; i++) {
+        newBoard.push({pieceType: undefined, player: undefined, notes: []});
+    }
+
+    for (let rankIndex = 0; rankIndex < 8; rankIndex++) {
+        let rankText = rankParts[rankIndex];
+        let file = 0;
+        for (let j = 0; j < rankText.length; j++) {
+            let ch = rankText[j];
+            let digit = parseInt(ch);
+            if (!isNaN(digit)) {
+                file += digit;
+                continue;
+            }
+
+            let lower = ch.toLowerCase();
+            let pieceType = coreFenPieceMap[lower];
+            if (pieceType == undefined) {
+                throw new Error("Unknown FEN piece: " + ch);
+            }
+
+            if (file > 7) {
+                throw new Error("Too many files in FEN rank.");
+            }
+
+            let player = ch == lower ? 1 : 0;
+            let y = 7 - rankIndex;
+            newBoard[y * 8 + file] = {
+                pieceType: pieceType,
+                player: player,
+                notes: []
+            };
+            file++;
+        }
+
+        if (file != 8) {
+            throw new Error("FEN rank does not contain 8 files.");
+        }
+    }
+
+    let sideToMove = parts[1].toLowerCase();
+    if (sideToMove != "w" && sideToMove != "b") {
+        throw new Error("FEN side to move must be w or b.");
+    }
+
+    // TODO: read castling rights from FEN when move rules support it
+    // TODO: read en passant target from FEN when move rules support it
+    // TODO: read halfmove/fullmove counters from FEN when move rules support it
+    return {
+        board: newBoard,
+        whoseTurn: sideToMove == "w" ? 0 : 1
+    };
+}
+
+function coreSanitizePgnToken(token) {
+    return token.trim();
+}
+
+function coreParsePgnMoveTokens(pgnText) {
+    let withoutComments = pgnText.replace(/\{[^}]*\}/g, " ").replace(/;[^\n]*/g, " ");
+    while (/\([^()]*\)/.test(withoutComments)) {
+        withoutComments = withoutComments.replace(/\([^()]*\)/g, " ");
+    }
+
+    withoutComments = withoutComments.replace(/\$\d+/g, " ");
+    let rawTokens = withoutComments.split(/\s+/);
+    let tokens = [];
+
+    for (let i = 0; i < rawTokens.length; i++) {
+        let token = rawTokens[i].trim();
+        if (token.length == 0) {
+            continue;
+        }
+
+        if (token.startsWith("[") || token.endsWith("]")) {
+            continue;
+        }
+
+        if (/^\d+\.{1,3}$/.test(token)) {
+            continue;
+        }
+
+        if (/^\d+\.{1,3}.+/.test(token)) {
+            token = token.replace(/^\d+\.{1,3}/, "");
+        }
+
+        if (token == "1-0" || token == "0-1" || token == "1/2-1/2" || token == "*") {
+            continue;
+        }
+
+        tokens.push(coreSanitizePgnToken(token));
+    }
+
+    return tokens;
+}
+
+function coreParsePgnResult(pgnText) {
+    let match = pgnText.match(/(1-0|0-1|1\/2-1\/2|\*)\s*$/);
+    if (!match) {
+        return "*";
+    }
+    return match[1];
+}
+
+function coreParseTokenToMove(token, player, boardState) {
+    let cleaned = token.trim();
+    if (cleaned.length == 0) {
+        return undefined;
+    }
+
+    cleaned = cleaned.replace(/0/g, "O");
+    let legalMoves = getLegalMoves(boardState, player);
+
+    let sanToken = coreNormalizeSanToken(cleaned);
+    for (let i = 0; i < legalMoves.length; i++) {
+        let san = coreCreateSanMoveText(legalMoves[i], boardState, player, legalMoves);
+        if (coreNormalizeSanToken(san) == sanToken) {
+            return legalMoves[i];
+        }
+    }
+
+    let coordinateToken = cleaned.toLowerCase().replace(/[+#?!]/g, "");
+    if (coordinateToken.length < 4) {
+        return undefined;
+    }
+
+    let from = coreParseSquareText(coordinateToken.slice(0, 2));
+    let to = coreParseSquareText(coordinateToken.slice(2, 4));
+    if (from == undefined || to == undefined) {
+        return undefined;
+    }
+
+    let promotionPieceType = undefined;
+    if (coordinateToken.length >= 5) {
+        promotionPieceType = corePromotionSuffixToPieceType[coordinateToken[4]];
+    }
+
+    let candidates = [];
+    for (let i = 0; i < legalMoves.length; i++) {
+        let move = legalMoves[i];
+        if (move.pieceIndex == from && move.moveTo == to) {
+            candidates.push(move);
+        }
+    }
+
+    if (promotionPieceType == undefined && candidates.length > 0) {
+        return candidates[0];
+    }
+
+    for (let i = 0; i < candidates.length; i++) {
+        if (candidates[i].notes && candidates[i].notes[0] == "promote" && candidates[i].notes[1] == promotionPieceType) {
+            return candidates[i];
+        }
+    }
+
+    return undefined;
+}
+
+function coreGetMoveTextForDisplay(moveRecord) {
+    return moveRecord.san || moveRecord.coordinate || "";
 }

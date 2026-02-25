@@ -12,6 +12,18 @@ let useDefaultPromotionCheckbox = document.getElementById("useDefaultPromotion")
 let promotionBypassKeyInput = document.getElementById("promotionBypassKey");
 let promotionChooser = document.getElementById("promotionChooser");
 let promotionButtons = promotionChooser.querySelectorAll("button[data-piece-type]");
+let fenTextInput = document.getElementById("fenText");
+let copyFenButton = document.getElementById("copyFen");
+let loadFenButton = document.getElementById("loadFen");
+let pgnTextInput = document.getElementById("pgnText");
+let copyPgnButton = document.getElementById("copyPgn");
+let loadPgnButton = document.getElementById("loadPgn");
+let goStartButton = document.getElementById("goStart");
+let goBackButton = document.getElementById("goBack");
+let goForwardButton = document.getElementById("goForward");
+let goEndButton = document.getElementById("goEnd");
+let moveInfo = document.getElementById("moveInfo");
+let plyList = document.getElementById("plyList");
 
 let squareSize = canvas.width / 8;
 let selectedSquare = undefined;
@@ -21,6 +33,11 @@ let enginePlayer = 1;
 let whoseTurn = humanPlayer;
 let pressedKeys = {};
 let pendingPromotionMoves = [];
+let positionHistory = [];
+let moveHistory = [];
+let currentPly = 0;
+let gameStartPlayer = 0;
+let gameResult = "*";
 
 let boardViewStates = {
     whiteBottom: "whiteBottom",
@@ -37,6 +54,106 @@ let pieceSymbols = {
     4: ["♕", "♛"],
     5: ["♔", "♚"]
 };
+
+function isViewingHistory() {
+    return currentPly != positionHistory.length - 1;
+}
+
+function pushCurrentPosition(moveToken) {
+    if (currentPly < positionHistory.length - 1) {
+        positionHistory = positionHistory.slice(0, currentPly + 1);
+        moveHistory = moveHistory.slice(0, currentPly);
+    }
+
+    moveHistory.push(moveToken);
+    positionHistory.push({
+        board: coreCloneBoardState(board),
+        whoseTurn: whoseTurn
+    });
+    currentPly = positionHistory.length - 1;
+    updateNotationUI();
+}
+
+function setHistoryToCurrentPosition() {
+    positionHistory = [{
+        board: coreCloneBoardState(board),
+        whoseTurn: whoseTurn
+    }];
+    moveHistory = [];
+    currentPly = 0;
+    gameStartPlayer = whoseTurn;
+    gameResult = "*";
+    updateNotationUI();
+}
+
+function renderPlyList() {
+    if (!plyList) {
+        return;
+    }
+
+    plyList.innerHTML = "";
+
+    for (let i = 0; i < moveHistory.length; i += 2) {
+        let row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.gap = "8px";
+
+        let whiteCell = document.createElement("div");
+        whiteCell.style.width = "100px";
+        whiteCell.textContent = (Math.floor(i / 2) + 1) + ". " + coreGetMoveTextForDisplay(moveHistory[i]);
+        if (currentPly - 1 == i) {
+            whiteCell.style.backgroundColor = "#ffef99";
+        }
+
+        row.appendChild(whiteCell);
+
+        let blackCell = document.createElement("div");
+        blackCell.style.width = "100px";
+        if (i + 1 < moveHistory.length) {
+            blackCell.textContent = coreGetMoveTextForDisplay(moveHistory[i + 1]);
+            if (currentPly - 1 == i + 1) {
+                blackCell.style.backgroundColor = "#ffef99";
+            }
+        }
+
+        row.appendChild(blackCell);
+        plyList.appendChild(row);
+    }
+}
+
+function updateNotationUI() {
+    if (fenTextInput) {
+        fenTextInput.value = coreBoardToFen(board, whoseTurn);
+    }
+
+    if (moveInfo) {
+        moveInfo.textContent = "Ply " + currentPly + " / " + moveHistory.length;
+    }
+
+    renderPlyList();
+}
+
+function goToPly(targetPly) {
+    if (positionHistory.length == 0) {
+        return;
+    }
+
+    let clamped = Math.max(0, Math.min(targetPly, positionHistory.length - 1));
+    let snapshot = positionHistory[clamped];
+    board = coreCloneBoardState(snapshot.board);
+    whoseTurn = snapshot.whoseTurn;
+    currentPly = clamped;
+    clearSelection();
+    hidePromotionChooser();
+    drawBoard();
+    updateNotationUI();
+}
+
+function copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+    }
+}
 
 function getDefaultViewStateForHumanSide() {
     return humanPlayer == 0 ? boardViewStates.whiteBottom : boardViewStates.blackBottom;
@@ -185,10 +302,14 @@ function findPromotionMoveByPieceType(pieceType) {
 }
 
 function completeHumanMove(chosenMove) {
+    let boardBefore = coreCloneBoardState(board);
+    let legalMoves = getMovesForPlayer(humanPlayer);
+    let moveRecord = coreCreateMoveRecord(chosenMove, boardBefore, humanPlayer, legalMoves);
     makeMove(chosenMove);
     clearSelection();
     hidePromotionChooser();
     whoseTurn = enginePlayer;
+    pushCurrentPosition(moveRecord);
     statusText.textContent = "Engine thinking...";
     drawBoard();
     setTimeout(engineTurn, 150);
@@ -300,24 +421,7 @@ function getMovesForPlayer(player) {
 }
 
 function makeMove(move) {
-    let from = move.pieceIndex;
-    let to = move.moveTo;
-
-    board[to] = {
-        pieceType: board[from].pieceType,
-        player: board[from].player,
-        notes: board[from].notes || []
-    };
-
-    board[from] = {
-        pieceType: undefined,
-        player: undefined,
-        notes: []
-    };
-
-    if (move.notes && move.notes[0] == "promote") {
-        board[to].pieceType = move.notes[1];
-    }
+    applyMoveInPlace(board, move);
 }
 
 function resetGame() {
@@ -325,6 +429,7 @@ function resetGame() {
     clearSelection();
     hidePromotionChooser();
     whoseTurn = 0;
+    setHistoryToCurrentPosition();
     if (whoseTurn == humanPlayer) {
         statusText.textContent = "Game reset. Your turn.";
     } else {
@@ -356,6 +461,10 @@ function engineTurn() {
         return;
     }
 
+    if (isViewingHistory()) {
+        return;
+    }
+
     let engineMove = pickEngineMove();
     if (!engineMove) {
         statusText.textContent = "Engine has no legal moves.";
@@ -363,13 +472,22 @@ function engineTurn() {
         return;
     }
 
+    let boardBefore = coreCloneBoardState(board);
+    let legalMoves = getMovesForPlayer(enginePlayer);
+    let moveRecord = coreCreateMoveRecord(engineMove, boardBefore, enginePlayer, legalMoves);
     makeMove(engineMove);
     whoseTurn = humanPlayer;
+    pushCurrentPosition(moveRecord);
     statusText.textContent = "Your turn.";
     drawBoard();
 }
 
 canvas.addEventListener("click", function (event) {
+    if (isViewingHistory()) {
+        statusText.textContent = "Use >| to return to the latest move before playing.";
+        return;
+    }
+
     if (whoseTurn != humanPlayer) {
         return;
     }
@@ -442,6 +560,86 @@ playBlackButton.addEventListener("click", function () {
 flipBoardButton.addEventListener("click", function () {
     toggleBoardViewState();
     drawBoard();
+});
+
+copyFenButton.addEventListener("click", function () {
+    updateNotationUI();
+    copyTextToClipboard(fenTextInput.value);
+    statusText.textContent = "FEN copied.";
+});
+
+loadFenButton.addEventListener("click", function () {
+    try {
+        let state = coreParseFenToState(fenTextInput.value);
+        board = state.board;
+        whoseTurn = state.whoseTurn;
+        clearSelection();
+        hidePromotionChooser();
+        setHistoryToCurrentPosition();
+        drawBoard();
+        statusText.textContent = "FEN loaded.";
+    } catch (err) {
+        statusText.textContent = "FEN load error: " + err.message;
+    }
+});
+
+copyPgnButton.addEventListener("click", function () {
+    let pgnText = coreBuildPgnText(moveHistory, gameStartPlayer, gameResult);
+    copyTextToClipboard(pgnText);
+    statusText.textContent = "PGN copied.";
+});
+
+loadPgnButton.addEventListener("click", function () {
+    try {
+        let sourcePgnText = pgnTextInput.value;
+        let parsedResult = coreParsePgnResult(sourcePgnText);
+        let tokens = coreParsePgnMoveTokens(sourcePgnText);
+
+        boardSetup();
+        clearSelection();
+        hidePromotionChooser();
+        whoseTurn = 0;
+        setHistoryToCurrentPosition();
+        gameResult = parsedResult;
+
+        for (let i = 0; i < tokens.length; i++) {
+            let move = coreParseTokenToMove(tokens[i], whoseTurn, board);
+            if (!move) {
+                throw new Error("Could not apply token: " + tokens[i]);
+            }
+
+            let boardBefore = coreCloneBoardState(board);
+            let legalMoves = getMovesForPlayer(whoseTurn);
+            let moveRecord = coreCreateMoveRecord(move, boardBefore, whoseTurn, legalMoves);
+            makeMove(move);
+            whoseTurn = 1 - whoseTurn;
+            pushCurrentPosition(moveRecord);
+        }
+
+        goToPly(0);
+        pgnTextInput.value = "";
+        statusText.textContent = "PGN loaded. At beginning of game.";
+    } catch (err) {
+        statusText.textContent = "PGN load error: " + err.message;
+    }
+});
+
+goStartButton.addEventListener("click", function () {
+    goToPly(0);
+    statusText.textContent = "At beginning of game.";
+});
+
+goBackButton.addEventListener("click", function () {
+    goToPly(currentPly - 1);
+});
+
+goForwardButton.addEventListener("click", function () {
+    goToPly(currentPly + 1);
+});
+
+goEndButton.addEventListener("click", function () {
+    goToPly(positionHistory.length - 1);
+    statusText.textContent = "At latest move.";
 });
 
 for (let i = 0; i < promotionButtons.length; i++) {
