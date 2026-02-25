@@ -28,7 +28,6 @@ function getBestMove(board, player, plies){
     };
     branchPositionTree(positionTree);
     scorePositionTree(positionTree);
-    console.log(positionTree);
     return positionTree.branches[positionTree.bestMoveIndex].moveDone;
 }
 
