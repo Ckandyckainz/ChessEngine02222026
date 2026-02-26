@@ -3,10 +3,72 @@
 
 let playerToPosNeg = [1, -1];
 
+let engineDeveloperBiasModes = {
+    optimizedFast: "optimizedFast",
+    upstreamSlow: "upstreamSlow"
+};
+
+let engineDeveloperBiasMode = engineDeveloperBiasModes.optimizedFast;
+
 let whiteMinorStartSquares = [1, 2, 5, 6];
 let blackMinorStartSquares = [57, 58, 61, 62];
 let whiteMinorCenterSquares = [18, 19, 20, 21];
 let blackMinorCenterSquares = [42, 43, 44, 45];
+
+function findKingIndex(board, player) {
+    for (let i = 0; i < board.length; i++) {
+        let square = board[i];
+        if (square.player == player && square.pieceType == 5) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+function isKingCastled(player, kingIndex) {
+    if (player == 0) {
+        return kingIndex == 6 || kingIndex == 2;
+    }
+
+    return kingIndex == 62 || kingIndex == 58;
+}
+
+function getSideCastlingPenalty(player, notesState, kingIndex) {
+    if (!notesState || kingIndex < 0 || isKingCastled(player, kingIndex)) {
+        return 0;
+    }
+
+    let kingSideMask = player == 0 ? CORE_C_WK : CORE_C_BK;
+    let queenSideMask = player == 0 ? CORE_C_WQ : CORE_C_BQ;
+    let hasKingSide = (notesState.c & kingSideMask) != 0;
+    let hasQueenSide = (notesState.c & queenSideMask) != 0;
+
+    if (!hasKingSide && !hasQueenSide) {
+        return 500;
+    }
+
+    let penalty = 0;
+    if (!hasKingSide) {
+        penalty += 250;
+    }
+    if (!hasQueenSide) {
+        penalty += 250;
+    }
+
+    return penalty;
+}
+
+function scoreCastlingRights(board, gameNotes) {
+    let notesState = gameNotes || coreGetGameNotes();
+    let whiteKingIndex = findKingIndex(board, 0);
+    let blackKingIndex = findKingIndex(board, 1);
+
+    let whitePenalty = getSideCastlingPenalty(0, notesState, whiteKingIndex);
+    let blackPenalty = getSideCastlingPenalty(1, notesState, blackKingIndex);
+
+    return blackPenalty - whitePenalty;
+}
 
 function scoreDevelopment(board) {
     let score = 0;
@@ -47,6 +109,32 @@ function scoreDevelopment(board) {
     return score;
 }
 
+function scoreUpstreamMobility(board, gameNotes) {
+    return getLegalMoves(board, 0, gameNotes).length - getLegalMoves(board, 1, gameNotes).length;
+}
+
+function scoreDeveloperBias(board, gameNotes) {
+    if (engineDeveloperBiasMode == engineDeveloperBiasModes.upstreamSlow) {
+        return scoreUpstreamMobility(board, gameNotes);
+    }
+
+    return scoreDevelopment(board);
+}
+
+function setEngineDeveloperBiasMode(mode) {
+    if (mode == engineDeveloperBiasModes.upstreamSlow || mode == engineDeveloperBiasModes.optimizedFast) {
+        engineDeveloperBiasMode = mode;
+    } else {
+        engineDeveloperBiasMode = engineDeveloperBiasModes.optimizedFast;
+    }
+
+    return engineDeveloperBiasMode;
+}
+
+function getEngineDeveloperBiasMode() {
+    return engineDeveloperBiasMode;
+}
+
 function scorePosition(board, player, gameNotes){
     let score = 0;
     for (let i=0; i<board.length; i++) {
@@ -55,7 +143,8 @@ function scorePosition(board, player, gameNotes){
             score += pieceTypes[square.pieceType].value*playerToPosNeg[square.player];
         }
     }
-    score += scoreDevelopment(board);
+    score += scoreDeveloperBias(board, gameNotes);
+    score += scoreCastlingRights(board, gameNotes);
     return score;
 }
 

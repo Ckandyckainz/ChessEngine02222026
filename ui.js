@@ -11,6 +11,7 @@ let defaultPromotionPieceSelect = document.getElementById("defaultPromotionPiece
 let useDefaultPromotionCheckbox = document.getElementById("useDefaultPromotion");
 let promotionBypassKeyInput = document.getElementById("promotionBypassKey");
 let enginePlyDepthInput = document.getElementById("enginePlyDepth");
+let developerBiasModeSelect = document.getElementById("developerBiasMode");
 let promotionChooser = document.getElementById("promotionChooser");
 let promotionButtons = promotionChooser.querySelectorAll("button[data-piece-type]");
 let fenTextInput = document.getElementById("fenText");
@@ -237,6 +238,24 @@ function applyEnginePlyInputValue(showStatus) {
 
     if (showStatus) {
         statusText.textContent = "Engine ply depth set to " + engineSearchPly + ".";
+    }
+}
+
+function applyDeveloperBiasMode(showStatus) {
+    if (!developerBiasModeSelect || typeof setEngineDeveloperBiasMode != "function") {
+        return;
+    }
+
+    let selectedMode = developerBiasModeSelect.value;
+    let appliedMode = setEngineDeveloperBiasMode(selectedMode);
+    developerBiasModeSelect.value = appliedMode;
+
+    if (showStatus) {
+        if (appliedMode == "upstreamSlow") {
+            statusText.textContent = "Developer bias mode set to Upstream mobility (slow).";
+        } else {
+            statusText.textContent = "Developer bias mode set to Optimized (fast).";
+        }
     }
 }
 
@@ -671,6 +690,17 @@ if (enginePlyDepthInput) {
 
     enginePlyDepthInput.addEventListener("change", function () {
         applyEnginePlyInputValue(true);
+    });
+}
+
+if (developerBiasModeSelect) {
+    if (typeof getEngineDeveloperBiasMode == "function") {
+        developerBiasModeSelect.value = getEngineDeveloperBiasMode();
+    }
+    applyDeveloperBiasMode(false);
+
+    developerBiasModeSelect.addEventListener("change", function () {
+        applyDeveloperBiasMode(true);
     });
 }
 
